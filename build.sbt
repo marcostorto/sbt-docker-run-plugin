@@ -8,9 +8,7 @@ version := {
 
 sbtPlugin := true
 
-libraryDependencies ++= Seq(
-  "io.github.swagger2markup" % "swagger2markup" % "1.3.0"
-)
+libraryDependencies ++= Seq()
 
 resolvers += "JCenter" at "http://jcenter.bintray.com"
 
