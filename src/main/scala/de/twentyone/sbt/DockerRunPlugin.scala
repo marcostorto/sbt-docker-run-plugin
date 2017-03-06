@@ -15,6 +15,8 @@ object DockerRunPlugin extends AutoPlugin {
 
     val dockerRunContainers =
       SettingKey[Seq[(String, DockerRunContainer)]]("docker-run-containers")
+    val dockerRunNetwork =
+      SettingKey[String]("docker-run-network")
     val dockerRunStart    = TaskKey[Map[String, Int]]("docker-run-start")
     val dockerRunStop     = TaskKey[Unit]("docker-run-stop")
     val dockerRunSnapshot = TaskKey[Unit]("docker-run-snapshot")
@@ -25,7 +27,13 @@ object DockerRunPlugin extends AutoPlugin {
   override def trigger = allRequirements
 
   override lazy val projectSettings = Seq(
+    dockerRunNetwork := s"${name.value}-docker-run",
     dockerRunStart := {
+      dockerRunStop.value
+
+      streams.value.log.info(s"Creating network ${dockerRunNetwork.value}")
+      s"docker network create ${dockerRunNetwork.value}".!(streams.value.log)
+
       val freePorts = findFreePorts(dockerRunContainers.value.length)
       dockerRunContainers.value.zipWithIndex.map {
         case ((ref, runContainer), idx) =>
@@ -41,8 +49,9 @@ object DockerRunPlugin extends AutoPlugin {
             .getOrElse("")
           val containerName =
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
-          s"docker rm -f $containerName".!(streams.value.log)
-          s"docker run -d --name $containerName $envParameters $publishParameters ${runContainer.image}"
+
+          streams.value.log.info(s"Starting ${runContainer.image} as $containerName")
+          s"docker run -d --name $containerName $envParameters $publishParameters --network ${dockerRunNetwork.value} --network-alias $ref ${runContainer.image}"
             .!(streams.value.log)
 
           if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
@@ -57,7 +66,11 @@ object DockerRunPlugin extends AutoPlugin {
           val containerName =
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
 
+          streams.value.log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
+
+          streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
+          s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
       }
     },
     dockerRunSnapshot := {
@@ -72,7 +85,11 @@ object DockerRunPlugin extends AutoPlugin {
             s"docker stop $containerName".!(streams.value.log)
             s"docker commit $containerName $snapshotName".!(streams.value.log)
           }
+          streams.value.log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
+
+          streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
+          s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
       }
     }
   )
