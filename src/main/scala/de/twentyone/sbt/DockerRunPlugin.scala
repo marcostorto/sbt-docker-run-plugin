@@ -6,15 +6,18 @@ import sbt._
 object DockerRunPlugin extends AutoPlugin {
 
   object autoImport {
-    val dockerRunImage         = SettingKey[String]("docker-run-image")
-    val dockerRunContainerName = SettingKey[String]("docker-run-container-name")
-    val dockerRunContainerPort = SettingKey[Int]("docker-run-container-port")
-    val dockerRunSnapshotName  = SettingKey[String]("docker-run-snapshot-name")
-    val dockerRunEnvironment   = SettingKey[Seq[(String, String)]]("docker-run-environment")
-    val dockerRunWaitHealthy   = SettingKey[Boolean]("docker-run-wait-healthy")
-    val dockerRunStart         = TaskKey[Int]("docker-run-start")
-    val dockerRunStop          = TaskKey[Unit]("docker-run-stop")
-    val dockerRunSnapshot      = TaskKey[Unit]("docker-run-snapshot")
+    case class DockerRunContainer(image: String,
+                                  environment: Seq[(String, String)] = Seq.empty,
+                                  containerName: Option[String] = None,
+                                  containerPort: Option[Int] = None,
+                                  snapshotName: Option[String] = None,
+                                  waitHealthy: Boolean = true)
+
+    val dockerRunContainers =
+      SettingKey[Seq[(String, DockerRunContainer)]]("docker-run-containers")
+    val dockerRunStart    = TaskKey[Map[String, Int]]("docker-run-start")
+    val dockerRunStop     = TaskKey[Unit]("docker-run-stop")
+    val dockerRunSnapshot = TaskKey[Unit]("docker-run-snapshot")
   }
 
   import autoImport._
@@ -22,38 +25,55 @@ object DockerRunPlugin extends AutoPlugin {
   override def trigger = allRequirements
 
   override lazy val projectSettings = Seq(
-    dockerRunContainerName := s"${name.value}-docker-run-${version.value}",
-    dockerRunEnvironment := Seq.empty,
-    dockerRunWaitHealthy := true,
     dockerRunStart := {
-      val envParameters = dockerRunEnvironment.value
-        .map {
-          case (name, value) => s"-e $name=$value"
-        }
-        .mkString(" ")
-      val port = findFreePort()
-      s"docker rm -f ${dockerRunContainerName.value}".!(streams.value.log)
+      val freePorts = findFreePorts(dockerRunContainers.value.length)
+      dockerRunContainers.value.zipWithIndex.map {
+        case ((ref, runContainer), idx) =>
+          val envParameters = runContainer.environment
+            .map {
+              case (name, value) => s"-e $name=$value"
+            }
+            .mkString(" ")
+          val publishParameters = runContainer.containerPort
+            .map { containerPort =>
+              s"-p${freePorts(idx)}:$containerPort"
+            }
+            .getOrElse("")
+          val containerName =
+            runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
+          s"docker rm -f $containerName".!(streams.value.log)
+          s"docker run -d --name $containerName $envParameters $publishParameters ${runContainer.image}"
+            .!(streams.value.log)
 
-      s"docker run -d --name ${dockerRunContainerName.value} $envParameters -p$port:${dockerRunContainerPort.value} ${dockerRunImage.value}"
-        .!(streams.value.log)
-
-      if (dockerRunWaitHealthy.value && !waitHealthy(dockerRunContainerName.value,
-                                                     streams.value.log)) {
-        sys.error("Docker container did not become healthy")
-      }
-
-      port
+          if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
+            sys.error(s"Docker container $ref did not become healthy")
+          }
+          ref -> freePorts(idx)
+      }.toMap
     },
     dockerRunStop := {
-      s"docker rm -f ${dockerRunContainerName.value}".!(streams.value.log)
+      dockerRunContainers.value.foreach {
+        case (ref, runContainer) =>
+          val containerName =
+            runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
+
+          s"docker rm -f $containerName".!(streams.value.log)
+      }
     },
     dockerRunSnapshot := {
-      streams.value.log
-        .info(s"Snapshotting ${dockerRunContainerName.value} to ${dockerRunSnapshotName.value}")
-      s"docker stop ${dockerRunContainerName.value}".!(streams.value.log)
-      s"docker commit ${dockerRunContainerName.value} ${dockerRunSnapshotName.value}"
-        .!(streams.value.log)
-      s"docker rm -f ${dockerRunContainerName.value}".!(streams.value.log)
+      dockerRunContainers.value.foreach {
+        case (ref, runContainer) =>
+          val containerName =
+            runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
+
+          runContainer.snapshotName.foreach { snapshotName =>
+            streams.value.log.info(s"Snapshotting $containerName to $snapshotName")
+
+            s"docker stop $containerName".!(streams.value.log)
+            s"docker commit $containerName $snapshotName".!(streams.value.log)
+          }
+          s"docker rm -f $containerName".!(streams.value.log)
+      }
     }
   )
 
@@ -68,18 +88,20 @@ object DockerRunPlugin extends AutoPlugin {
 
       val status2 = ("docker inspect -f \"{{.State.Health.Status}}\" " + containerName).!!
 
-      log.info(s"ITDocker is $status1")
+      log.info(s"$containerName is $status1")
       status1.contains("healthy") && status2.contains("healthy")
     }
   }
 
-  def findFreePort() = {
-    var socket = new java.net.ServerSocket(0)
-    socket.setReuseAddress(true)
-
-    val port = socket.getLocalPort
-    socket.close()
-    port
+  def findFreePorts(count: Int) = {
+    val sockets = Range(0, count).map { _ =>
+      var socket = new java.net.ServerSocket(0)
+      socket.setReuseAddress(true)
+      socket
+    }
+    val ports = sockets.map(_.getLocalPort)
+    sockets.foreach(_.close())
+    ports
   }
 
   def findEnvOrSysProp(name: String): Option[String] =
