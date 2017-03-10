@@ -26,6 +26,7 @@ object DockerRunPlugin extends AutoPlugin {
 
   import autoImport._
 
+  val dockerPortMappings = new mutable.HashMap[String, Int] with mutable.SynchronizedMap[String, Int]
   val dockerContainers = new mutable.HashSet[String] with mutable.SynchronizedSet[String]
   val dockerNetworks = new mutable.HashSet[String] with mutable.SynchronizedSet[String]
 
@@ -36,14 +37,16 @@ object DockerRunPlugin extends AutoPlugin {
   override lazy val projectSettings = Seq(
     dockerRunNetwork := s"${name.value}-docker-run",
     dockerRunStart := {
-      dockerRunStop.andFinally().value
-
-      streams.value.log.info(s"Creating network ${dockerRunNetwork.value}")
-      dockerNetworks.add(dockerRunNetwork.value)
-      s"docker network create ${dockerRunNetwork.value}".!(streams.value.log)
+      if(!dockerNetworks.contains(dockerRunNetwork.value)) {
+        streams.value.log.info(s"Creating network ${dockerRunNetwork.value}")
+        dockerNetworks.add(dockerRunNetwork.value)
+        s"docker network create ${dockerRunNetwork.value}".!(streams.value.log)
+      }
 
       val freePorts = findFreePorts(dockerRunContainers.value.length)
       dockerRunContainers.value.zipWithIndex.map {
+        case ((ref, _), _) if dockerPortMappings.contains(ref) =>
+          ref -> dockerPortMappings(ref)
         case ((ref, runContainer), idx) =>
           val envParameters = runContainer.environment
             .map {
@@ -66,6 +69,7 @@ object DockerRunPlugin extends AutoPlugin {
           if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
             sys.error(s"Docker container $ref did not become healthy")
           }
+          dockerPortMappings.put(ref, freePorts(idx))
           ref -> freePorts(idx)
       }.toMap
     },
@@ -78,6 +82,7 @@ object DockerRunPlugin extends AutoPlugin {
           streams.value.log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
           dockerContainers.remove(containerName)
+          dockerPortMappings.remove(ref)
 
           streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
           s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
@@ -99,6 +104,7 @@ object DockerRunPlugin extends AutoPlugin {
           streams.value.log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
           dockerContainers.remove(containerName)
+          dockerPortMappings.remove(ref)
 
           streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
           s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
