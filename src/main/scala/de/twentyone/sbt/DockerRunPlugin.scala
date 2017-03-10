@@ -3,6 +3,8 @@ package de.twentyone.sbt
 import sbt.Keys._
 import sbt._
 
+import scala.collection.mutable
+
 object DockerRunPlugin extends AutoPlugin {
 
   object autoImport {
@@ -24,14 +26,20 @@ object DockerRunPlugin extends AutoPlugin {
 
   import autoImport._
 
+  val dockerContainers = new mutable.HashSet[String] with mutable.SynchronizedSet[String]
+  val dockerNetworks = new mutable.HashSet[String] with mutable.SynchronizedSet[String]
+
+  sys.addShutdownHook(cleanUpContainers)
+
   override def trigger = allRequirements
 
   override lazy val projectSettings = Seq(
     dockerRunNetwork := s"${name.value}-docker-run",
     dockerRunStart := {
-      dockerRunStop.value
+      dockerRunStop.andFinally().value
 
       streams.value.log.info(s"Creating network ${dockerRunNetwork.value}")
+      dockerNetworks.add(dockerRunNetwork.value)
       s"docker network create ${dockerRunNetwork.value}".!(streams.value.log)
 
       val freePorts = findFreePorts(dockerRunContainers.value.length)
@@ -51,6 +59,7 @@ object DockerRunPlugin extends AutoPlugin {
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
 
           streams.value.log.info(s"Starting ${runContainer.image} as $containerName")
+          dockerContainers.add(containerName)
           s"docker run -d --name $containerName $envParameters $publishParameters --network ${dockerRunNetwork.value} --network-alias $ref ${runContainer.image}"
             .!(streams.value.log)
 
@@ -68,9 +77,11 @@ object DockerRunPlugin extends AutoPlugin {
 
           streams.value.log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
+          dockerContainers.remove(containerName)
 
           streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
           s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
+          dockerNetworks.remove(dockerRunNetwork.value)
       }
     },
     dockerRunSnapshot := {
@@ -87,9 +98,11 @@ object DockerRunPlugin extends AutoPlugin {
           }
           streams.value.log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
+          dockerContainers.remove(containerName)
 
           streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
           s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
+          dockerNetworks.remove(dockerRunNetwork.value)
       }
     }
   )
@@ -119,6 +132,19 @@ object DockerRunPlugin extends AutoPlugin {
     val ports = sockets.map(_.getLocalPort)
     sockets.foreach(_.close())
     ports
+  }
+
+  def cleanUpContainers() = {
+    dockerContainers.foreach {
+      containerName =>
+        println(s"Terminating docker container $containerName")
+        s"docker rm -f $containerName".!
+    }
+    dockerNetworks.foreach {
+      networkName =>
+        println(s"Terminating docker network $networkName")
+        s"docker network rm $networkName".!
+    }
   }
 
   def findEnvOrSysProp(name: String): Option[String] =
