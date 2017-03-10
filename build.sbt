@@ -3,7 +3,7 @@ name := "sbt-docker-run-plugin"
 organization := "de.21re"
 
 version := {
-  "0.1-" + sys.props.get("BUILD_NUMBER").orElse(sys.env.get("BUILD_NUMBER")).getOrElse("SNAPSHOT")
+  "0.2-" + sys.props.get("BUILD_NUMBER").orElse(sys.env.get("BUILD_NUMBER")).getOrElse("SNAPSHOT")
 }
 
 sbtPlugin := true
