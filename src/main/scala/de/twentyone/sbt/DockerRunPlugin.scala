@@ -4,6 +4,7 @@ import sbt.Keys._
 import sbt._
 
 import scala.collection.mutable
+import scala.sys.process.ProcessLogger
 
 object DockerRunPlugin extends AutoPlugin {
 
@@ -48,23 +49,24 @@ object DockerRunPlugin extends AutoPlugin {
         case ((ref, _), _) if dockerPortMappings.contains(ref) =>
           ref -> dockerPortMappings(ref)
         case ((ref, runContainer), idx) =>
-          val envParameters = runContainer.environment
-            .map {
-              case (name, value) => s"-e '$name=$value'"
+          val envParameters: Seq[String] = runContainer.environment
+            .flatMap {
+              case (name, value) => Seq("-e", s"$name=$value")
             }
-            .mkString(" ")
           val publishParameters = runContainer.containerPort
-            .map { containerPort =>
-              s"-p${freePorts(idx)}:$containerPort"
+            .toSeq
+            .flatMap { containerPort =>
+              Seq("-p", s"${freePorts(idx)}:$containerPort")
             }
-            .getOrElse("")
           val containerName =
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
 
           streams.value.log.info(s"Starting ${runContainer.image} as $containerName")
           dockerContainers.add(containerName)
-          s"docker run -d --name $containerName $envParameters $publishParameters --network ${dockerRunNetwork.value} --network-alias $ref ${runContainer.image}"
-            .!(streams.value.log)
+
+          val exec = Seq("docker", "run", "-d", "--name", containerName) ++ envParameters ++ publishParameters ++ Seq("--network", dockerRunNetwork.value, "--network-alias", ref, runContainer.image)
+          streams.value.log.info(s"""Starting `${exec.mkString(" ")}`""")
+          sbt.Process(exec).!(streams.value.log)
 
           if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
             sys.error(s"Docker container $ref did not become healthy")
