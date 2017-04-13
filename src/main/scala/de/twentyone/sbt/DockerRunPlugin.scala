@@ -50,7 +50,7 @@ object DockerRunPlugin extends AutoPlugin {
         case ((ref, runContainer), idx) =>
           val envParameters = runContainer.environment
             .map {
-              case (name, value) => s"-e $name=$value"
+              case (name, value) => s"-e '$name=$value'"
             }
             .mkString(" ")
           val publishParameters = runContainer.containerPort
