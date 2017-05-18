@@ -69,6 +69,9 @@ object DockerRunPlugin extends AutoPlugin {
           sbt.Process(exec).!(streams.value.log)
 
           if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
+            import scala.sys.process._
+            val containerLogs = Seq("docker", "logs", "-t", containerName).!!
+            streams.value.log.error(s"Container $ref did not become healthy. `docker logs` output follows:\n$containerLogs")
             sys.error(s"Docker container $ref did not become healthy")
           }
           dockerPortMappings.put(ref, freePorts(idx))
