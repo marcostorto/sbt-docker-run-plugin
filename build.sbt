@@ -8,6 +8,8 @@ version := {
 
 sbtPlugin := true
 
+crossSbtVersions := Seq("1.0.2", "0.13.16")
+
 libraryDependencies ++= Seq()
 
 resolvers += "JCenter" at "http://jcenter.bintray.com"

@@ -4,7 +4,9 @@ import sbt.Keys._
 import sbt._
 
 import scala.collection.mutable
-import scala.sys.process.ProcessLogger
+
+import de.twentyone.ProcessUtil.ReProcess
+import de.twentyone.ProcessUtil.stringToProcess
 
 object DockerRunPlugin extends AutoPlugin {
 
@@ -25,6 +27,7 @@ object DockerRunPlugin extends AutoPlugin {
     val dockerRunSnapshot = TaskKey[Unit]("docker-run-snapshot")
   }
 
+
   import autoImport._
 
   val dockerPortMappings = new mutable.HashMap[String, Int] with mutable.SynchronizedMap[String, Int]
@@ -38,10 +41,12 @@ object DockerRunPlugin extends AutoPlugin {
   override lazy val projectSettings = Seq(
     dockerRunNetwork := s"${name.value}-docker-run",
     dockerRunStart := {
+      val log = streams.value.log
+
       if(!dockerNetworks.contains(dockerRunNetwork.value)) {
-        streams.value.log.info(s"Creating network ${dockerRunNetwork.value}")
+        log.info(s"Creating network ${dockerRunNetwork.value}")
         dockerNetworks.add(dockerRunNetwork.value)
-        s"docker network create ${dockerRunNetwork.value}".!(streams.value.log)
+        s"docker network create ${dockerRunNetwork.value}".!(log)
       }
 
       val freePorts = findFreePorts(dockerRunContainers.value.length)
@@ -61,17 +66,17 @@ object DockerRunPlugin extends AutoPlugin {
           val containerName =
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
 
-          streams.value.log.info(s"Starting ${runContainer.image} as $containerName")
+          log.info(s"Starting ${runContainer.image} as $containerName")
           dockerContainers.add(containerName)
 
           val exec = Seq("docker", "run", "-d", "--name", containerName) ++ envParameters ++ publishParameters ++ Seq("--network", dockerRunNetwork.value, "--network-alias", ref, runContainer.image)
-          streams.value.log.info(s"""Starting `${exec.mkString(" ")}`""")
-          sbt.Process(exec).!(streams.value.log)
+          log.info(s"""Starting `${exec.mkString(" ")}`""")
+          ReProcess(exec).!(log)
 
           if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
             import scala.sys.process._
             val containerLogs = Seq("docker", "logs", "-t", containerName).!!
-            streams.value.log.error(s"Container $ref did not become healthy. `docker logs` output follows:\n$containerLogs")
+            log.error(s"Container $ref did not become healthy. `docker logs` output follows:\n$containerLogs")
             sys.error(s"Docker container $ref did not become healthy")
           }
           dockerPortMappings.put(ref, freePorts(idx))
@@ -79,40 +84,42 @@ object DockerRunPlugin extends AutoPlugin {
       }.toMap
     },
     dockerRunStop := {
+      val log = streams.value.log
       dockerRunContainers.value.foreach {
         case (ref, runContainer) =>
           val containerName =
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
 
-          streams.value.log.info(s"Removing $containerName")
+          log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(streams.value.log)
           dockerContainers.remove(containerName)
           dockerPortMappings.remove(ref)
 
-          streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
-          s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
+          log.info(s"Removing network ${dockerRunNetwork.value}")
+          s"docker network rm ${dockerRunNetwork.value}".!(log)
           dockerNetworks.remove(dockerRunNetwork.value)
       }
     },
     dockerRunSnapshot := {
+      val log = streams.value.log
       dockerRunContainers.value.foreach {
         case (ref, runContainer) =>
           val containerName =
             runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
 
           runContainer.snapshotName.foreach { snapshotName =>
-            streams.value.log.info(s"Snapshotting $containerName to $snapshotName")
+            log.info(s"Snapshotting $containerName to $snapshotName")
 
-            s"docker stop $containerName".!(streams.value.log)
-            s"docker commit $containerName $snapshotName".!(streams.value.log)
+            s"docker stop $containerName".!(log)
+            s"docker commit $containerName $snapshotName".!(log)
           }
-          streams.value.log.info(s"Removing $containerName")
-          s"docker rm -f $containerName".!(streams.value.log)
+          log.info(s"Removing $containerName")
+          s"docker rm -f $containerName".!(log)
           dockerContainers.remove(containerName)
           dockerPortMappings.remove(ref)
 
-          streams.value.log.info(s"Removing network ${dockerRunNetwork.value}")
-          s"docker network rm ${dockerRunNetwork.value}".!(streams.value.log)
+          log.info(s"Removing network ${dockerRunNetwork.value}")
+          s"docker network rm ${dockerRunNetwork.value}".!(log)
           dockerNetworks.remove(dockerRunNetwork.value)
       }
     }
