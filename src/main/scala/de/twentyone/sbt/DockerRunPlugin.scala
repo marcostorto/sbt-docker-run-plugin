@@ -16,7 +16,8 @@ object DockerRunPlugin extends AutoPlugin {
                                   containerName: Option[String] = None,
                                   containerPort: Option[Int] = None,
                                   snapshotName: Option[String] = None,
-                                  waitHealthy: Boolean = true)
+                                  waitHealthy: Boolean = true,
+                                  dockerArgs :Seq[String] = Seq.empty)
 
     val dockerRunContainers =
       SettingKey[Seq[(String, DockerRunContainer)]]("docker-run-containers")
@@ -69,7 +70,7 @@ object DockerRunPlugin extends AutoPlugin {
           log.info(s"Starting ${runContainer.image} as $containerName")
           dockerContainers.add(containerName)
 
-          val exec = Seq("docker", "run", "-d", "--name", containerName) ++ envParameters ++ publishParameters ++ Seq("--network", dockerRunNetwork.value, "--network-alias", ref, runContainer.image)
+          val exec = Seq("docker", "run", "-d", "--name", containerName) ++ envParameters ++ publishParameters ++ runContainer.dockerArgs ++ Seq("--network", dockerRunNetwork.value, "--network-alias", ref, runContainer.image)
           log.info(s"""Starting `${exec.mkString(" ")}`""")
           ReProcess(exec).!(log)
 
