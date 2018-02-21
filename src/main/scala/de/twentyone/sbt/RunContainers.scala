@@ -2,7 +2,6 @@ package de.twentyone.sbt
 
 import de.twentyone.ProcessUtil.{ReProcess, stringToProcess}
 import de.twentyone.sbt.DockerRunPlugin.autoImport.{DockerRunContainer, dockerRunNetwork}
-import sbt.Keys.streams
 import sbt.Logger
 
 import collection.mutable
@@ -13,6 +12,7 @@ object ContainerState extends Enumeration {
   val Pending = Value
   val Starting = Value
   val Running = Value
+  val Up = Value
 }
 
 class RunContainers(projectName: String, projectVersion: String, log : Logger, dockerNetwork: String, containers : Seq[(String, DockerRunContainer)]) {
@@ -29,8 +29,10 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
   def start() : Boolean = {
     ensureNetwork()
 
-    Range(0, 300).exists { _ =>
-      val states = getStates()
+    var states : Map[String, ContainerState.Type] = Map.empty
+
+    Range(0, 100).exists { _ =>
+      states = getStates(states)
 
       log.info("Docker run: Container states")
       containers.foreach {
@@ -38,7 +40,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
           log.info(s"Docker run: ${ref.padTo(40, ' ')} is ${states(ref)}")
       }
 
-      if(states.values.forall(_ == ContainerState.Running))
+      if(states.values.forall(_ == ContainerState.Up))
         true
       else {
         containers.foreach {
@@ -62,7 +64,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
           case _ => ()
         }
 
-        Thread.sleep(1000)
+        Thread.sleep(2000)
         false
       }
     }
@@ -88,11 +90,14 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
     }
   }
 
-  private def getStates(): Map[String, ContainerState.Type] =
+  private def getStates(lastState : Map[String, ContainerState.Type]): Map[String, ContainerState.Type] =
     containers.map {
-      case (ref, runContainer) if started.contains(ref) =>
-        ref -> getState(containerNames(ref), runContainer.waitHealthy)
-      case (ref, _) => ref -> ContainerState.Pending
+      case (ref, runContainer) if started.contains(ref) && !lastState.get(ref).exists(_ == ContainerState.Up)=>
+        ref -> (getState(containerNames(ref), runContainer.waitHealthy) match {
+          case ContainerState.Running if lastState.get(ref).exists(_ == ContainerState.Running) => ContainerState.Up
+          case state => state
+        })
+      case (ref, _) => ref -> lastState.getOrElse(ref, ContainerState.Pending)
     }.toMap
 
   private def getState(containerName: String, requireHealthy: Boolean) : ContainerState.Type = {
