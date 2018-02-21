@@ -1,10 +1,11 @@
 package de.twentyone.sbt
 
+import java.util.concurrent.atomic.AtomicReference
+
 import sbt.Keys._
 import sbt._
 
 import scala.collection.mutable
-
 import de.twentyone.ProcessUtil.ReProcess
 import de.twentyone.ProcessUtil.stringToProcess
 
@@ -17,7 +18,8 @@ object DockerRunPlugin extends AutoPlugin {
                                   containerPort: Option[Int] = None,
                                   snapshotName: Option[String] = None,
                                   waitHealthy: Boolean = true,
-                                  dockerArgs :Seq[String] = Seq.empty)
+                                  dockerArgs :Seq[String] = Seq.empty,
+                                  dependsOn: Seq[String] = Seq.empty)
 
     val dockerRunContainers =
       SettingKey[Seq[(String, DockerRunContainer)]]("docker-run-containers")
@@ -31,9 +33,7 @@ object DockerRunPlugin extends AutoPlugin {
 
   import autoImport._
 
-  val dockerPortMappings = new mutable.HashMap[String, Int] with mutable.SynchronizedMap[String, Int]
-  val dockerContainers = new mutable.HashSet[String] with mutable.SynchronizedSet[String]
-  val dockerNetworks = new mutable.HashSet[String] with mutable.SynchronizedSet[String]
+  val runContainers = new AtomicReference[Option[RunContainers]](None)
 
   sys.addShutdownHook(cleanUpContainers)
 
@@ -43,63 +43,17 @@ object DockerRunPlugin extends AutoPlugin {
     dockerRunNetwork := s"${name.value}-docker-run",
     dockerRunStart := {
       val log = streams.value.log
+      runContainers.compareAndSet(None, Some(new RunContainers(name.value, version.value, log, dockerRunNetwork.value, dockerRunContainers.value)))
+      val run = runContainers.get().get
 
-      if(!dockerNetworks.contains(dockerRunNetwork.value)) {
-        log.info(s"Creating network ${dockerRunNetwork.value}")
-        dockerNetworks.add(dockerRunNetwork.value)
-        s"docker network create ${dockerRunNetwork.value}".!(log)
+      if(!run.start()) {
+        sys.error("Docker run: Startup failed")
       }
-
-      val freePorts = findFreePorts(dockerRunContainers.value.length)
-      dockerRunContainers.value.zipWithIndex.map {
-        case ((ref, _), _) if dockerPortMappings.contains(ref) =>
-          ref -> dockerPortMappings(ref)
-        case ((ref, runContainer), idx) =>
-          val envParameters: Seq[String] = runContainer.environment
-            .flatMap {
-              case (name, value) => Seq("-e", s"$name=$value")
-            }
-          val publishParameters = runContainer.containerPort
-            .toSeq
-            .flatMap { containerPort =>
-              Seq("-p", s"${freePorts(idx)}:$containerPort")
-            }
-          val containerName =
-            runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
-
-          log.info(s"Starting ${runContainer.image} as $containerName")
-          dockerContainers.add(containerName)
-
-          val exec = Seq("docker", "run", "-d", "--name", containerName) ++ envParameters ++ publishParameters ++ runContainer.dockerArgs ++ Seq("--network", dockerRunNetwork.value, "--network-alias", ref, runContainer.image)
-          log.info(s"""Starting `${exec.mkString(" ")}`""")
-          ReProcess(exec).!(log)
-
-          if (runContainer.waitHealthy && !waitHealthy(containerName, streams.value.log)) {
-            import scala.sys.process._
-            val containerLogs = Seq("docker", "logs", "-t", containerName).!!
-            log.error(s"Container $ref did not become healthy. `docker logs` output follows:\n$containerLogs")
-            sys.error(s"Docker container $ref did not become healthy")
-          }
-          dockerPortMappings.put(ref, freePorts(idx))
-          ref -> freePorts(idx)
-      }.toMap
+      run.portMappings
     },
     dockerRunStop := {
-      val log = streams.value.log
-      dockerRunContainers.value.foreach {
-        case (ref, runContainer) =>
-          val containerName =
-            runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
-
-          log.info(s"Removing $containerName")
-          s"docker rm -f $containerName".!(streams.value.log)
-          dockerContainers.remove(containerName)
-          dockerPortMappings.remove(ref)
-
-          log.info(s"Removing network ${dockerRunNetwork.value}")
-          s"docker network rm ${dockerRunNetwork.value}".!(log)
-          dockerNetworks.remove(dockerRunNetwork.value)
-      }
+      runContainers.get().foreach(_.stop())
+      runContainers.set(None)
     },
     dockerRunSnapshot := {
       val log = streams.value.log
@@ -116,13 +70,11 @@ object DockerRunPlugin extends AutoPlugin {
           }
           log.info(s"Removing $containerName")
           s"docker rm -f $containerName".!(log)
-          dockerContainers.remove(containerName)
-          dockerPortMappings.remove(ref)
 
           log.info(s"Removing network ${dockerRunNetwork.value}")
           s"docker network rm ${dockerRunNetwork.value}".!(log)
-          dockerNetworks.remove(dockerRunNetwork.value)
       }
+      runContainers.set(None)
     }
   )
 
@@ -154,16 +106,7 @@ object DockerRunPlugin extends AutoPlugin {
   }
 
   def cleanUpContainers() = {
-    dockerContainers.foreach {
-      containerName =>
-        println(s"Terminating docker container $containerName")
-        s"docker rm -f $containerName".!
-    }
-    dockerNetworks.foreach {
-      networkName =>
-        println(s"Terminating docker network $networkName")
-        s"docker network rm $networkName".!
-    }
+    runContainers.get().foreach(_.stop())
   }
 
   def findEnvOrSysProp(name: String): Option[String] =
