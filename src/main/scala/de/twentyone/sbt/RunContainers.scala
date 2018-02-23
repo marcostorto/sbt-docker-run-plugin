@@ -48,7 +48,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
       else {
         containers.foreach {
           case (ref, _) if started.contains(ref) => ()
-          case (ref, runContainer) if runContainer.dependsOn.forall(dep => states.get(dep).exists(_ == ContainerState.Running)) =>
+          case (ref, runContainer) if runContainer.dependsOn.forall(dep => states.get(dep).exists(_ == ContainerState.Up)) =>
             val envParameters: Seq[String] = runContainer.environment
               .flatMap {
                 case (name, value) => Seq("-e", s"$name=$value")
@@ -96,7 +96,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
   private def getStates(lastState : Map[String, ContainerState.Type]): Map[String, ContainerState.Type] =
     containers.map {
       case (ref, runContainer) if started.contains(ref) =>
-        ref -> (getState(containerNames(ref), runContainer.waitHealthy) match {
+        ref -> (getState(ref, containerNames(ref), runContainer.waitHealthy) match {
           case ContainerState.Running if lastState.get(ref).exists(s => s == ContainerState.Running || s == ContainerState.Up) => ContainerState.Up
           case _ if lastState.get(ref).exists(s => s == ContainerState.Running || s == ContainerState.Up) => ContainerState.Broken
           case state => state
@@ -104,7 +104,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
       case (ref, _) => ref -> lastState.getOrElse(ref, ContainerState.Pending)
     }.toMap
 
-  private def getState(containerName: String, requireHealthy: Boolean) : ContainerState.Type = {
+  private def getState(ref: String, containerName: String, requireHealthy: Boolean) : ContainerState.Type = {
     val baseState = if (requireHealthy) {
       Try { ("docker inspect -f \"{{.State.Health.Status}}\" " + containerName).!! } match {
         case Success(output) if output.contains("healthy") => ContainerState.Running
@@ -120,9 +120,9 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
     }
 
     if (baseState == ContainerState.Running) {
-      val pingExit = (s"docker run --rm --network $dockerNetwork alpine ping -c 1 $containerName").! 
+      val pingExit = (s"docker run --rm --network $dockerNetwork alpine ping -c 1 $ref").! 
       if(pingExit != 0) {
-        log.info(s"Docker run: $containerName not pingable")
+        log.info(s"Docker run: $ref not pingable")
         ContainerState.Starting
       } else
         ContainerState.Running
