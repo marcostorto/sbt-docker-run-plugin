@@ -13,6 +13,7 @@ object ContainerState extends Enumeration {
   val Starting = Value
   val Running = Value
   val Up = Value
+  val Broken = Value
 }
 
 class RunContainers(projectName: String, projectVersion: String, log : Logger, dockerNetwork: String, containers : Seq[(String, DockerRunContainer)]) {
@@ -40,7 +41,9 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
           log.info(s"Docker run: ${ref.padTo(40, ' ')} is ${states(ref)}")
       }
 
-      if(states.values.forall(_ == ContainerState.Up))
+      if(states.values.exists(_ == ContainerState.Broken))
+        false
+      else if(states.values.forall(_ == ContainerState.Up))
         true
       else {
         containers.foreach {
@@ -92,16 +95,17 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
 
   private def getStates(lastState : Map[String, ContainerState.Type]): Map[String, ContainerState.Type] =
     containers.map {
-      case (ref, runContainer) if started.contains(ref) && !lastState.get(ref).exists(_ == ContainerState.Up)=>
+      case (ref, runContainer) if started.contains(ref) =>
         ref -> (getState(containerNames(ref), runContainer.waitHealthy) match {
-          case ContainerState.Running if lastState.get(ref).exists(_ == ContainerState.Running) => ContainerState.Up
+          case ContainerState.Running if lastState.get(ref).exists(s => s == ContainerState.Running || s == ContainerState.Up) => ContainerState.Up
+          case _ if lastState.get(ref).exists(s => s == ContainerState.Running || s == ContainerState.Up) => ContainerState.Broken
           case state => state
         })
       case (ref, _) => ref -> lastState.getOrElse(ref, ContainerState.Pending)
     }.toMap
 
   private def getState(containerName: String, requireHealthy: Boolean) : ContainerState.Type = {
-    if (requireHealthy) {
+    val baseState = if (requireHealthy) {
       Try { ("docker inspect -f \"{{.State.Health.Status}}\" " + containerName).!! } match {
         case Success(output) if output.contains("healthy") => ContainerState.Running
         case Success(_) => ContainerState.Starting
@@ -114,6 +118,16 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
         case _ => ContainerState.Pending
       }
     }
+
+    if (baseState == ContainerState.Running) {
+      val pingExit = (s"docker run --rm --network $dockerNetwork alpine ping -c 1 $containerName").! 
+      if(pingExit != 0) {
+        log.info(s"Docker run: $containerName not pingable")
+        ContainerState.Starting
+      } else
+        ContainerState.Running
+    } else 
+      baseState
   }
 
   def findFreePorts(count: Int) : Seq[Int] = {

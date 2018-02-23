@@ -78,33 +78,6 @@ object DockerRunPlugin extends AutoPlugin {
     }
   )
 
-  def waitHealthy(containerName: String, log: Logger): Boolean = {
-    Range(0, 100).exists { _ =>
-      // Double querying somewhat circumvents potential hickup that might occur
-      Thread.sleep(2000)
-
-      val status1 = ("docker inspect -f \"{{.State.Health.Status}}\" " + containerName).!!
-
-      Thread.sleep(2000)
-
-      val status2 = ("docker inspect -f \"{{.State.Health.Status}}\" " + containerName).!!
-
-      log.info(s"$containerName is $status1")
-      status1.contains("healthy") && status2.contains("healthy")
-    }
-  }
-
-  def findFreePorts(count: Int) = {
-    val sockets = Range(0, count).map { _ =>
-      var socket = new java.net.ServerSocket(0)
-      socket.setReuseAddress(true)
-      socket
-    }
-    val ports = sockets.map(_.getLocalPort)
-    sockets.foreach(_.close())
-    ports
-  }
-
   def cleanUpContainers() = {
     runContainers.get().foreach(_.stop())
   }
