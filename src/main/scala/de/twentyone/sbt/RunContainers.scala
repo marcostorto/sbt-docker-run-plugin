@@ -41,11 +41,12 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
           log.info(s"Docker run: ${ref.padTo(40, ' ')} is ${states(ref)}")
       }
 
-      if(states.values.exists(_ == ContainerState.Broken))
+      if(states.values.exists(_ == ContainerState.Broken)) {
+        Thread.sleep(2000)
         false
-      else if(states.values.forall(_ == ContainerState.Up))
+      } else if(states.values.forall(_ == ContainerState.Up)) {
         true
-      else {
+      } else {
         containers.foreach {
           case (ref, _) if started.contains(ref) => ()
           case (ref, runContainer) if runContainer.dependsOn.forall(dep => states.get(dep).exists(_ == ContainerState.Up)) =>
@@ -59,7 +60,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
                 Seq("-p", s"${portMappings(ref)}:$containerPort")
               }
 
-            val exec = Seq("docker", "run", "-d", "--name", containerNames(ref)) ++ envParameters ++ publishParameters ++ runContainer.dockerArgs ++ Seq("--network", dockerNetwork, "--network-alias", ref, runContainer.image)
+            val exec = Seq("docker", "run", "-d", "--name", containerNames(ref)) ++ envParameters ++ publishParameters ++ runContainer.dockerArgs ++ Seq("--restart", "on-failure:20", "--network", dockerNetwork, "--network-alias", ref, runContainer.image)
             log.info(s"""Docker run: Starting `${exec.mkString(" ")}`""")
             ReProcess(exec).!(log)
 
@@ -107,6 +108,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
   private def getState(ref: String, containerName: String, requireHealthy: Boolean) : ContainerState.Type = {
     val baseState = if (requireHealthy) {
       Try { ("docker inspect -f \"{{.State.Health.Status}}\" " + containerName).!! } match {
+        case Success(output) if output.contains("unhealthy") => ContainerState.Broken
         case Success(output) if output.contains("healthy") => ContainerState.Running
         case Success(_) => ContainerState.Starting
         case _ => ContainerState.Pending
@@ -114,19 +116,20 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
     } else {
       Try { ("docker inspect -f \"{{.State.Status}}\" " + containerName).!! } match {
         case Success(output) if output.contains("running") => ContainerState.Running
+        case Success(output) if output.contains("exited") => ContainerState.Broken
         case Success(_) => ContainerState.Starting
         case _ => ContainerState.Pending
       }
     }
 
     if (baseState == ContainerState.Running) {
-      val pingExit = (s"docker run --rm --network $dockerNetwork alpine ping -c 1 $ref").! 
+      val pingExit = (s"docker run --rm --network $dockerNetwork alpine ping -c 1 $ref").!
       if(pingExit != 0) {
         log.info(s"Docker run: $ref not pingable")
         ContainerState.Starting
       } else
         ContainerState.Running
-    } else 
+    } else
       baseState
   }
 
