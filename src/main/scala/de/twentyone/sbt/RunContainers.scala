@@ -85,7 +85,7 @@ class RunContainers(projectName: String, projectVersion: String, log : Logger, d
     s"docker network rm $dockerNetwork".!(log)
   }
 
-  private def ensureNetwork(): Unit = {
+  def ensureNetwork(): Unit = {
     val networkExists = "docker network ls --format \"{{.Name}}\"".lines_!.contains(dockerNetwork)
 
     if (!networkExists) {

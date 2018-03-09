@@ -39,11 +39,12 @@ object DockerRunPlugin extends AutoPlugin {
 
   override def trigger = allRequirements
 
-  override lazy val projectSettings = Seq(
-    dockerRunNetwork := s"${name.value}-docker-run",
+  lazy val baseSettings = Seq(
+    dockerRunContainers := Seq(),
+    dockerRunNetwork := s"${name.value}-${configuration.value.name}-docker-run",
     dockerRunStart := {
       val log = streams.value.log
-      runContainers.compareAndSet(None, Some(new RunContainers(name.value, version.value, log, dockerRunNetwork.value, dockerRunContainers.value)))
+      runContainers.compareAndSet(None, Some(new RunContainers(s"${name.value}-${configuration.value.name}", version.value, log, dockerRunNetwork.value, dockerRunContainers.value)))
       val run = runContainers.get().get
 
       if(!run.start()) {
@@ -60,7 +61,7 @@ object DockerRunPlugin extends AutoPlugin {
       dockerRunContainers.value.foreach {
         case (ref, runContainer) =>
           val containerName =
-            runContainer.containerName.getOrElse(s"${name.value}-$ref-docker-run-${version.value}")
+            runContainer.containerName.getOrElse(s"${name.value}-${configuration.value.name}-$ref-docker-run-${version.value}")
 
           runContainer.snapshotName.foreach { snapshotName =>
             log.info(s"Snapshotting $containerName to $snapshotName")
@@ -77,6 +78,10 @@ object DockerRunPlugin extends AutoPlugin {
       runContainers.set(None)
     }
   )
+
+  override lazy val projectSettings = Seq(Test, IntegrationTest) flatMap { conf =>
+    inConfig(conf)(baseSettings)
+  }
 
   def cleanUpContainers() = {
     runContainers.get().foreach(_.stop())
