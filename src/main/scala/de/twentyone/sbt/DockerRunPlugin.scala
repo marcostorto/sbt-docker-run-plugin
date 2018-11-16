@@ -15,21 +15,21 @@ object DockerRunPlugin extends AutoPlugin {
     case class DockerRunContainer(image: String,
                                   environment: Seq[(String, String)] = Seq.empty,
                                   containerName: Option[String] = None,
-                                  containerPort: Option[Int] = None,
+                                  containerPorts: Seq[Int] = Seq.empty,
                                   snapshotName: Option[String] = None,
                                   waitHealthy: Boolean = true,
-                                  dockerArgs :Seq[String] = Seq.empty,
-                                  dependsOn: Seq[String] = Seq.empty)
+                                  dockerArgs: Seq[String] = Seq.empty,
+                                  dependsOn: Seq[String] = Seq.empty,
+                                  mounts: Seq[(String, String)] = Seq.empty)
 
     val dockerRunContainers =
       SettingKey[Seq[(String, DockerRunContainer)]]("docker-run-containers")
     val dockerRunNetwork =
       SettingKey[String]("docker-run-network")
-    val dockerRunStart    = TaskKey[Map[String, Int]]("docker-run-start")
+    val dockerRunStart    = TaskKey[Map[String, Seq[Int]]]("docker-run-start")
     val dockerRunStop     = TaskKey[Unit]("docker-run-stop")
     val dockerRunSnapshot = TaskKey[Unit]("docker-run-snapshot")
   }
-
 
   import autoImport._
 
@@ -44,10 +44,16 @@ object DockerRunPlugin extends AutoPlugin {
     dockerRunNetwork := s"${name.value}-${configuration.value.name}-docker-run",
     dockerRunStart := {
       val log = streams.value.log
-      runContainers.compareAndSet(None, Some(new RunContainers(s"${name.value}-${configuration.value.name}", version.value, log, dockerRunNetwork.value, dockerRunContainers.value)))
+      runContainers.compareAndSet(None,
+                                  Some(
+                                    new RunContainers(s"${name.value}-${configuration.value.name}",
+                                                      version.value,
+                                                      log,
+                                                      dockerRunNetwork.value,
+                                                      dockerRunContainers.value)))
       val run = runContainers.get().get
 
-      if(!run.start()) {
+      if (!run.start()) {
         sys.error("Docker run: Startup failed")
       }
       run.portMappings
@@ -61,7 +67,8 @@ object DockerRunPlugin extends AutoPlugin {
       dockerRunContainers.value.foreach {
         case (ref, runContainer) =>
           val containerName =
-            runContainer.containerName.getOrElse(s"${name.value}-${configuration.value.name}-$ref-docker-run-${version.value}")
+            runContainer.containerName.getOrElse(
+              s"${name.value}-${configuration.value.name}-$ref-docker-run-${version.value}")
 
           runContainer.snapshotName.foreach { snapshotName =>
             log.info(s"Snapshotting $containerName to $snapshotName")
