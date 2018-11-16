@@ -20,7 +20,7 @@ object DockerRunPlugin extends AutoPlugin {
                                   waitHealthy: Boolean = true,
                                   dockerArgs: Seq[String] = Seq.empty,
                                   dependsOn: Seq[String] = Seq.empty,
-                                  mounts: Seq[(String, String)] = Seq.empty)
+                                  shmSize: Option[String] = None)
 
     val dockerRunContainers =
       SettingKey[Seq[(String, DockerRunContainer)]]("docker-run-containers")

@@ -75,11 +75,11 @@ class RunContainers(projectName: String,
                 runContainer.containerPorts.zip(portMappings(ref)).flatMap {
                   case (containerPort, publicPort) => Seq("-p", s"$publicPort:$containerPort")
                 }
-            val mountParameters = runContainer.mounts.flatMap {
-              case (outside, inside) => Seq("-v", s"$outside:$inside")
+            val shmSizeParameter = runContainer.shmSize.toSeq.flatMap { size =>
+              Seq("--shm-size", size)
             }
 
-            val exec = Seq("docker", "run", "-d", "--name", containerNames(ref)) ++ envParameters ++ publishParameters ++ mountParameters ++ runContainer.dockerArgs ++ Seq(
+            val exec = Seq("docker", "run", "-d", "--name", containerNames(ref)) ++ envParameters ++ publishParameters ++ shmSizeParameter ++ runContainer.dockerArgs ++ Seq(
               "--restart",
               "on-failure:20",
               "--network",
