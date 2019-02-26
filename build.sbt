@@ -8,7 +8,7 @@ version := {
 
 sbtPlugin := true
 
-crossSbtVersions := Seq("1.0.2", "0.13.16")
+crossSbtVersions := Seq("1.2.8")
 
 libraryDependencies ++= Seq()
 
