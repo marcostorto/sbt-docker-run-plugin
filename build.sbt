@@ -4,7 +4,7 @@ name := "sbt-docker-run-plugin"
 organization := "de.21re"
 
 version := {
-  "0.2-21p2"
+  "0.2-21p3"
 }
 
 sbtPlugin := true

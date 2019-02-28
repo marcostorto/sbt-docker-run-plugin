@@ -115,7 +115,8 @@ class RunContainers(projectName: String,
   }
 
   def ensureNetwork(): Unit = {
-    val networkExists = "docker network ls --format \"{{.Name}}\"".lines_!.contains(dockerNetwork)
+    val networkExists = "docker network ls --format \"{{.Name}}\""
+      .lineStream_!.count(_.contains(dockerNetwork)) > 0
 
     if (!networkExists) {
       log.info(s"Docker run: Creating network $dockerNetwork")
