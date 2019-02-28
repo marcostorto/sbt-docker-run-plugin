@@ -94,7 +94,7 @@ class RunContainers(projectName: String,
           case _ => ()
         }
 
-        Thread.sleep(2000)
+        Thread.sleep(500)
         false
       }
     }
@@ -105,6 +105,7 @@ class RunContainers(projectName: String,
       case (ref, _) if started.contains(ref) =>
         log.info(s"Docker run: Removing ${containerNames(ref)}")
         s"docker rm -f ${containerNames(ref)}".!(log)
+        started.remove(ref)
       case _ => ()
     }
     log.info(s"Docker run: Removing network $dockerNetwork")
@@ -161,7 +162,7 @@ class RunContainers(projectName: String,
       }
     }
 
-    if (baseState == ContainerState.Running) {
+    if (baseState == ContainerState.Running && !requireHealthy) {
       val pingExit = (s"docker run --rm --network $dockerNetwork alpine ping -c 1 $ref").!
       if (pingExit != 0) {
         log.info(s"Docker run: $ref not pingable")

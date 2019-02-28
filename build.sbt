@@ -1,9 +1,10 @@
+
 name := "sbt-docker-run-plugin"
 
 organization := "de.21re"
 
 version := {
-  "0.2-" + sys.props.get("BUILD_NUMBER").orElse(sys.env.get("BUILD_NUMBER")).getOrElse("SNAPSHOT")
+  "0.2-21p2"
 }
 
 sbtPlugin := true
@@ -14,16 +15,15 @@ libraryDependencies ++= Seq()
 
 resolvers += "JCenter" at "http://jcenter.bintray.com"
 
-publishMavenStyle := false
+publishMavenStyle := true
 
-bintrayOrganization := Some("21re")
+sonatypeProfileName := "21re"
 
-bintrayRepository := "public"
 
-bintrayCredentialsFile := {
-  sys.props
-    .get("BINTRAY_CREDENTIALS")
-    .orElse(sys.env.get("BINTRAY_CREDENTIALS"))
-    .map(new File(_))
-    .getOrElse(baseDirectory.value / ".bintray" / "credentials")
+publishTo := {
+  val nexus =
+    "http://repo02.tecniplastgroup.com:8081/"
+  Some(
+    "releases" at nexus + "repository/maven-releases/"
+  )
 }
